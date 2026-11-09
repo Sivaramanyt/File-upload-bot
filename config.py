@@ -51,5 +51,5 @@ class Settings:
             port=int(os.getenv("PORT", "8000")),
             worker_poll_seconds=int(os.getenv("WORKER_POLL_SECONDS", "5")),
             max_upload_attempts=int(os.getenv("MAX_UPLOAD_ATTEMPTS", "5")),
-            publish_interval_minutes=max(1, int(os.getenv("PUBLISH_INTERVAL_MINUTES", "30"))),
+            publish_interval_minutes=max(1, int(os.getenv("PUBLISH_INTERVAL_MINUTES", "15"))),
         )

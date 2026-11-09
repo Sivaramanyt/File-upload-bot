@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import html
 import logging
 import os
@@ -86,10 +87,17 @@ async def main():
     )
     pixhost = PixhostClient(
         api_base=os.getenv("PIXHOST_API_BASE", "https://api.pixhost.cc"),
-        content_type=1,  # NSFW / adult preview classification
+        content_type=1,
         thumb_size=int(os.getenv("PIXHOST_THUMB_SIZE", "420")),
     )
-    state = {"paused": False, "started_at": int(time.time())}
+    saved_interval = await store.get_setting(
+        "publish_interval_minutes", cfg.publish_interval_minutes
+    )
+    state = {
+        "paused": False,
+        "started_at": int(time.time()),
+        "publish_interval_minutes": max(1, saved_interval),
+    }
 
     async def enqueue(chat_id, message_id, filename, file_size):
         if chat_id != cfg.storage_channel_id:
@@ -125,7 +133,7 @@ async def main():
         if not admin_only(message):
             return
         await message.answer(
-            "File Upload Bot is running. Commands: /status, /pause, /resume, /retry"
+            "File Upload Bot is running. Use /help to see admin commands."
         )
 
     @dp.message(Command("status"))
@@ -143,9 +151,100 @@ async def main():
         await message.answer(
             "<b>Publisher status</b>\n"
             f"Paused: {state['paused']}\n"
-            f"Publishing interval: {cfg.publish_interval_minutes} minutes\n"
+            f"Publishing interval: {state['publish_interval_minutes']} minutes\n"
             f"Next publish slot: {html.escape(wait_text)}\n"
             + ("\n".join(lines) if lines else "No jobs yet."),
+            parse_mode="HTML",
+        )
+
+    @dp.message(Command("queue"))
+    async def cmd_queue(message: BotMessage):
+        if not admin_only(message):
+            return
+        jobs = await store.list_queue(10)
+        if not jobs:
+            await message.answer("📭 Queue is empty.")
+            return
+        lines = ["<b>Upcoming queue (first 10)</b>"]
+        for job in jobs:
+            name = html.escape(job["filename"][:70])
+            status = "⏳ Processing" if job["status"] == "processing" else "🕒 Pending"
+            lines.append(f"#{job['id']} · {status}\n{name}")
+        await message.answer("\n\n".join(lines), parse_mode="HTML")
+
+    @dp.message(Command("history"))
+    async def cmd_history(message: BotMessage):
+        if not admin_only(message):
+            return
+        jobs = await store.list_history(10)
+        if not jobs:
+            await message.answer("No publishing history yet.")
+            return
+        lines = ["<b>Recent history (last 10)</b>"]
+        labels = {
+            "published": "✅ Published",
+            "failed": "❌ Failed",
+            "duplicate": "♻️ Duplicate skipped",
+            "skipped": "⏭ Skipped by admin",
+        }
+        for job in jobs:
+            name = html.escape(job["filename"][:65])
+            line = f"#{job['id']} · {labels.get(job['status'], job['status'])}\n{name}"
+            if job["status"] == "duplicate" and job.get("duplicate_of"):
+                line += f"\nDuplicate of job #{job['duplicate_of']}"
+            lines.append(line)
+        await message.answer("\n\n".join(lines), parse_mode="HTML")
+
+    @dp.message(Command("skip"))
+    async def cmd_skip(message: BotMessage):
+        if not admin_only(message):
+            return
+        job_id = await store.skip_next_pending()
+        if job_id is None:
+            await message.answer("No pending job to skip. Processing jobs are not affected.")
+        else:
+            await message.answer(
+                f"⏭ Skipped pending job #{job_id}. The currently processing job was not changed."
+            )
+
+    @dp.message(Command("setinterval"))
+    async def cmd_setinterval(message: BotMessage):
+        if not admin_only(message):
+            return
+        parts = (message.text or "").split(maxsplit=1)
+        if len(parts) != 2:
+            await message.answer("Usage: /setinterval 30\nAllowed range: 1–1440 minutes.")
+            return
+        try:
+            minutes = int(parts[1].strip())
+        except ValueError:
+            await message.answer("Please enter a whole number. Example: /setinterval 30")
+            return
+        if not 1 <= minutes <= 1440:
+            await message.answer("Interval must be between 1 and 1440 minutes.")
+            return
+        await store.set_setting("publish_interval_minutes", minutes)
+        state["publish_interval_minutes"] = minutes
+        await message.answer(
+            f"✅ Publishing interval saved: {minutes} minute(s). "
+            "It applies after the next successful publication."
+        )
+
+    @dp.message(Command("stats"))
+    async def cmd_stats(message: BotMessage):
+        if not admin_only(message):
+            return
+        counts = await store.counts()
+        total = sum(counts.values())
+        await message.answer(
+            "<b>Upload analytics</b>\n"
+            f"Total jobs: {total}\n"
+            f"Published: {counts.get('published', 0)}\n"
+            f"Pending: {counts.get('pending', 0)}\n"
+            f"Processing: {counts.get('processing', 0)}\n"
+            f"Failed: {counts.get('failed', 0)}\n"
+            f"Duplicates skipped: {counts.get('duplicate', 0)}\n"
+            f"Skipped by admin: {counts.get('skipped', 0)}",
             parse_mode="HTML",
         )
 
@@ -171,8 +270,19 @@ async def main():
     @dp.message(Command("help"))
     async def cmd_help(message: BotMessage):
         if admin_only(message):
-            await message.answer("/status - queue status\n/pause - pause uploads\n"
-                                 "/resume - resume uploads\n/retry - retry failed jobs")
+            await message.answer(
+                "<b>Admin commands</b>\n"
+                "/status - publisher and queue status\n"
+                "/queue - first 10 pending/processing jobs\n"
+                "/history - last 10 completed jobs\n"
+                "/stats - upload analytics\n"
+                "/skip - skip the oldest pending job\n"
+                "/setinterval 30 - change publish interval\n"
+                "/pause - pause uploads\n"
+                "/resume - resume uploads\n"
+                "/retry - retry failed jobs",
+                parse_mode="HTML",
+            )
 
     @telethon.on(events.NewMessage(chats=cfg.storage_channel_id))
     async def on_telethon_message(event):
@@ -185,8 +295,6 @@ async def main():
         job_id = job["id"]
         title = Path(job["filename"]).stem[:180] or "Video"
 
-        # Reuse saved PeeStream/Pixhost links on retries. If the preview is missing,
-        # download the original again and create it.
         video_url = job.get("video_url")
         filecode = job.get("peestream_filecode")
         thumbnail_url = job.get("thumbnail_url")
@@ -211,6 +319,24 @@ async def main():
                     raise RuntimeError("Downloaded video exceeds MAX_VIDEO_MB")
 
                 if not video_url:
+                    digest = hashlib.sha256()
+                    with open(temp_path, "rb") as video_file:
+                        for chunk in iter(lambda: video_file.read(1024 * 1024), b""):
+                            digest.update(chunk)
+                    duplicate_of = await store.register_content_hash(
+                        job_id, digest.hexdigest()
+                    )
+                    if duplicate_of:
+                        await notify_admin(
+                            f"♻️ Duplicate skipped: <b>{html.escape(title)}</b> "
+                            f"(job #{job_id}); already published as job #{duplicate_of}."
+                        )
+                        log.info(
+                            "Skipped duplicate job %s; original published job is %s",
+                            job_id, duplicate_of
+                        )
+                        return
+
                     filecode, video_url = await peestream.upload(temp_path, title)
                     await store.update(
                         job_id, peestream_filecode=filecode,
@@ -218,7 +344,6 @@ async def main():
                     )
 
                 if not thumbnail_url:
-                    # Extract a representative frame. FFmpeg is installed in the Docker image.
                     proc = await asyncio.create_subprocess_exec(
                         "ffmpeg", "-hide_banner", "-loglevel", "error",
                         "-ss", "00:00:03", "-i", temp_path,
@@ -229,7 +354,6 @@ async def main():
                     )
                     _, stderr = await proc.communicate()
                     if proc.returncode != 0 or not os.path.exists(thumb_path):
-                        # Some short clips end before 3 seconds; try the first frame.
                         proc = await asyncio.create_subprocess_exec(
                             "ffmpeg", "-hide_banner", "-loglevel", "error",
                             "-i", temp_path, "-frames:v", "1",
@@ -273,13 +397,11 @@ async def main():
                 disable_web_page_preview=False,
             )
         await store.update(job_id, status="published", error=None)
-        # Persist the next publishing slot so a process restart does not
-        # release the remaining queue immediately.
-        next_slot = int(time.time()) + cfg.publish_interval_minutes * 60
+        next_slot = int(time.time()) + state["publish_interval_minutes"] * 60
         await store.set_next_publish_at(next_slot)
         log.info(
             "Next queued video can publish in %s minute(s)",
-            cfg.publish_interval_minutes,
+            state["publish_interval_minutes"],
         )
         await notify_admin(
             f"✅ Published: <b>{safe_title}</b>\n"
@@ -353,7 +475,6 @@ async def main():
             "with generate_session.py and set it as a Koyeb secret."
         )
 
-    # Long polling requires the bot webhook to be cleared first.
     await bot.delete_webhook(drop_pending_updates=False)
 
     worker_task = asyncio.create_task(worker(), name="upload-worker")

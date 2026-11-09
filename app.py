@@ -28,16 +28,41 @@ log = logging.getLogger("file-upload-bot")
 def media_details(message):
     video = getattr(message, "video", None)
     document = getattr(message, "document", None)
+    media_file = getattr(message, "file", None)
+
     if video:
-        return (
-            getattr(video, "file_name", None) or "video.mp4",
-            int(getattr(video, "file_size", 0) or 0),
+        name = (
+            getattr(video, "file_name", None)
+            or getattr(media_file, "name", None)
+            or "video.mp4"
         )
+        size = (
+            getattr(video, "file_size", None)
+            or getattr(video, "size", None)
+            or getattr(media_file, "size", None)
+            or 0
+        )
+        return name, int(size)
+
     if document:
-        mime = (getattr(document, "mime_type", "") or "").lower()
+        mime = (
+            getattr(document, "mime_type", None)
+            or getattr(media_file, "mime_type", None)
+            or ""
+        ).lower()
         if mime.startswith("video/"):
-            name = getattr(document, "file_name", None) or "video"
-            return name, int(getattr(document, "file_size", 0) or 0)
+            name = (
+                getattr(document, "file_name", None)
+                or getattr(media_file, "name", None)
+                or "video"
+            )
+            size = (
+                getattr(document, "file_size", None)
+                or getattr(document, "size", None)
+                or getattr(media_file, "size", None)
+                or 0
+            )
+            return name, int(size)
     return None
 
 

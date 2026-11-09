@@ -2,6 +2,7 @@ import asyncio
 import html
 import logging
 import os
+import subprocess
 import tempfile
 import time
 from pathlib import Path
@@ -17,6 +18,7 @@ from telethon.sessions import StringSession
 from config import Settings
 from database import JobStore
 from peestream import PeeStreamClient
+from pixhost import PixhostClient
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -81,6 +83,11 @@ async def main():
         cfg.peestream_api_key,
         cfg.peestream_folder_id,
         cfg.peestream_link_template,
+    )
+    pixhost = PixhostClient(
+        api_base=os.getenv("PIXHOST_API_BASE", "https://api.pixhost.cc"),
+        content_type=1,  # NSFW / adult preview classification
+        thumb_size=int(os.getenv("PIXHOST_THUMB_SIZE", "420")),
     )
     state = {"paused": False, "started_at": int(time.time())}
 
@@ -170,11 +177,13 @@ async def main():
         job_id = job["id"]
         title = Path(job["filename"]).stem[:180] or "Video"
 
-        # If upload already completed but Telegram publishing failed, reuse saved URL.
+        # Reuse saved PeeStream/Pixhost links on retries. If the preview is missing,
+        # download the original again and create it.
         video_url = job.get("video_url")
         filecode = job.get("peestream_filecode")
+        thumbnail_url = job.get("thumbnail_url")
 
-        if not video_url:
+        if not video_url or not thumbnail_url:
             msg = await telethon.get_messages(
                 cfg.storage_channel_id, ids=job["message_id"]
             )
@@ -184,6 +193,7 @@ async def main():
             suffix = Path(job["filename"]).suffix or ".video"
             fd, temp_path = tempfile.mkstemp(prefix="upload-", suffix=suffix)
             os.close(fd)
+            thumb_path = temp_path + ".jpg"
             try:
                 downloaded = await telethon.download_media(msg, file=temp_path)
                 if not downloaded or not os.path.exists(temp_path):
@@ -192,28 +202,68 @@ async def main():
                 if actual_size > cfg.max_video_mb * 1024 * 1024:
                     raise RuntimeError("Downloaded video exceeds MAX_VIDEO_MB")
 
-                filecode, video_url = await peestream.upload(temp_path, title)
-                await store.update(
-                    job_id,
-                    peestream_filecode=filecode,
-                    video_url=video_url,
-                    error=None,
-                )
+                if not video_url:
+                    filecode, video_url = await peestream.upload(temp_path, title)
+                    await store.update(
+                        job_id, peestream_filecode=filecode,
+                        video_url=video_url, error=None,
+                    )
+
+                if not thumbnail_url:
+                    # Extract a representative frame. FFmpeg is installed in the Docker image.
+                    proc = await asyncio.create_subprocess_exec(
+                        "ffmpeg", "-hide_banner", "-loglevel", "error",
+                        "-ss", "00:00:03", "-i", temp_path,
+                        "-frames:v", "1", "-vf", "scale=960:-2",
+                        "-q:v", "3", "-y", thumb_path,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    _, stderr = await proc.communicate()
+                    if proc.returncode != 0 or not os.path.exists(thumb_path):
+                        # Some short clips end before 3 seconds; try the first frame.
+                        proc = await asyncio.create_subprocess_exec(
+                            "ffmpeg", "-hide_banner", "-loglevel", "error",
+                            "-i", temp_path, "-frames:v", "1",
+                            "-vf", "scale=960:-2", "-q:v", "3", "-y", thumb_path,
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE,
+                        )
+                        _, stderr = await proc.communicate()
+                    if proc.returncode != 0 or not os.path.exists(thumb_path):
+                        raise RuntimeError(
+                            "FFmpeg thumbnail extraction failed: "
+                            + (stderr.decode(errors="replace")[-500:])
+                        )
+                    show_url, thumbnail_url = await pixhost.upload(thumb_path)
+                    await store.update(
+                        job_id, thumbnail_url=thumbnail_url, error=None
+                    )
+                    log.info("Pixhost preview uploaded: %s", show_url)
             finally:
-                try:
-                    os.remove(temp_path)
-                except FileNotFoundError:
-                    pass
+                for path in (temp_path, thumb_path):
+                    try:
+                        os.remove(path)
+                    except FileNotFoundError:
+                        pass
 
         safe_title = html.escape(title)
         safe_url = html.escape(video_url, quote=True)
         post = f"<b>{safe_title}</b>\n\n▶️ <a href=\"{safe_url}\">Watch video</a>"
-        await bot.send_message(
-            cfg.target_channel_id,
-            post,
-            parse_mode="HTML",
-            disable_web_page_preview=False,
-        )
+        if thumbnail_url:
+            await bot.send_photo(
+                cfg.target_channel_id,
+                photo=thumbnail_url,
+                caption=post,
+                parse_mode="HTML",
+            )
+        else:
+            await bot.send_message(
+                cfg.target_channel_id,
+                post,
+                parse_mode="HTML",
+                disable_web_page_preview=False,
+            )
         await store.update(job_id, status="published", error=None)
         await notify_admin(
             f"✅ Published: <b>{safe_title}</b>\n"

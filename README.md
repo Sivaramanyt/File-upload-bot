@@ -16,7 +16,7 @@ Automatically monitors a Telegram storage channel, uploads eligible videos to Pe
 - `/history` — last 10 published, failed, duplicate, or skipped jobs.
 - `/stats` — total and status-wise upload counts.
 - `/skip` — skip the oldest pending job (does not interrupt a processing upload).
-- `/setinterval 30` — persist a publishing interval in minutes (1–1440).
+- `/setinterval 15` — persist a publishing interval in minutes (1–1440).
 - `/pause`, `/resume`, `/retry`, `/help`.
 
 ## Duplicate protection

@@ -430,6 +430,7 @@ async def main():
             "Next queued video can publish in %s minute(s)",
             state["publish_interval_minutes"],
         )
+        safe_url = html.escape(video_url, quote=True)
         await notify_admin(
             f"✅ Published: <b>{safe_title}</b>\n"
             f"<a href=\"{safe_url}\">Open video link</a>"

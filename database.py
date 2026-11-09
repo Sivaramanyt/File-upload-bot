@@ -22,7 +22,8 @@ class JobStore:
                     status TEXT NOT NULL DEFAULT 'pending',
                     attempts INTEGER NOT NULL DEFAULT 0,
                     peestream_filecode TEXT,
-                    video_url TEXT,\n                    thumbnail_url TEXT,
+                    video_url TEXT,
+                    thumbnail_url TEXT,
                     error TEXT,
                     created_at INTEGER NOT NULL,
                     updated_at INTEGER NOT NULL,
@@ -31,8 +32,13 @@ class JobStore:
                 )
             """)
             columns = await (await db.execute("PRAGMA table_info(jobs)")).fetchall()
-            if "thumbnail_url" not in {row[1] for row in columns}:
+            existing = {row[1] for row in columns}
+            if "thumbnail_url" not in existing:
                 await db.execute("ALTER TABLE jobs ADD COLUMN thumbnail_url TEXT")
+            if "content_sha256" not in existing:
+                await db.execute("ALTER TABLE jobs ADD COLUMN content_sha256 TEXT")
+            if "duplicate_of" not in existing:
+                await db.execute("ALTER TABLE jobs ADD COLUMN duplicate_of INTEGER")
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS scheduler_state (
                     key TEXT PRIMARY KEY,
@@ -40,6 +46,7 @@ class JobStore:
                 )
             """)
             await db.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status, next_attempt_at)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_jobs_content_sha256 ON jobs(content_sha256)")
             # A process may have been interrupted during a transfer. Re-queue it safely.
             await db.execute(
                 "UPDATE jobs SET status='pending', updated_at=? WHERE status='processing'",
@@ -59,23 +66,54 @@ class JobStore:
             await db.commit()
             return cur.rowcount == 1
 
-    async def get_next_publish_at(self):
+    async def register_content_hash(self, job_id: int, digest: str):
+        """Save a SHA-256 fingerprint and skip this job if the same file was published before."""
+        now = int(time.time())
         async with aiosqlite.connect(self.path) as db:
             cur = await db.execute(
-                "SELECT value FROM scheduler_state WHERE key='next_publish_at'"
+                """SELECT id FROM jobs
+                   WHERE content_sha256=? AND status='published' AND id<>?
+                   ORDER BY id ASC LIMIT 1""",
+                (digest, job_id),
             )
-            row = await cur.fetchone()
-            return int(row[0]) if row else 0
-
-    async def set_next_publish_at(self, timestamp: int):
-        async with aiosqlite.connect(self.path) as db:
+            previous = await cur.fetchone()
+            if previous:
+                await db.execute(
+                    """UPDATE jobs SET content_sha256=?, duplicate_of=?, status='duplicate',
+                       error=NULL, updated_at=? WHERE id=?""",
+                    (digest, int(previous[0]), now, job_id),
+                )
+                await db.commit()
+                return int(previous[0])
             await db.execute(
-                """INSERT INTO scheduler_state(key, value)
-                   VALUES ('next_publish_at', ?)
-                   ON CONFLICT(key) DO UPDATE SET value=excluded.value""",
-                (int(timestamp),),
+                "UPDATE jobs SET content_sha256=?, updated_at=? WHERE id=?",
+                (digest, now, job_id),
             )
             await db.commit()
+            return None
+
+    async def get_setting(self, key: str, default: int = 0):
+        async with aiosqlite.connect(self.path) as db:
+            cur = await db.execute(
+                "SELECT value FROM scheduler_state WHERE key=?", (key,)
+            )
+            row = await cur.fetchone()
+            return int(row[0]) if row else int(default)
+
+    async def set_setting(self, key: str, value: int):
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                """INSERT INTO scheduler_state(key, value) VALUES (?, ?)
+                   ON CONFLICT(key) DO UPDATE SET value=excluded.value""",
+                (key, int(value)),
+            )
+            await db.commit()
+
+    async def get_next_publish_at(self):
+        return await self.get_setting("next_publish_at", 0)
+
+    async def set_next_publish_at(self, timestamp: int):
+        await self.set_setting("next_publish_at", timestamp)
 
     async def next_job(self):
         now = int(time.time())
@@ -122,6 +160,45 @@ class JobStore:
         async with aiosqlite.connect(self.path) as db:
             cur = await db.execute("SELECT status, COUNT(*) FROM jobs GROUP BY status")
             return {row[0]: row[1] for row in await cur.fetchall()}
+
+    async def list_queue(self, limit: int = 10):
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
+                """SELECT id, filename, status, attempts, next_attempt_at
+                   FROM jobs WHERE status IN ('pending','processing')
+                   ORDER BY id ASC LIMIT ?""",
+                (limit,),
+            )
+            return [dict(row) for row in await cur.fetchall()]
+
+    async def list_history(self, limit: int = 10):
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
+                """SELECT id, filename, status, updated_at, duplicate_of, error
+                   FROM jobs WHERE status IN ('published','failed','duplicate','skipped')
+                   ORDER BY updated_at DESC LIMIT ?""",
+                (limit,),
+            )
+            return [dict(row) for row in await cur.fetchall()]
+
+    async def skip_next_pending(self):
+        now = int(time.time())
+        async with aiosqlite.connect(self.path) as db:
+            cur = await db.execute(
+                "SELECT id FROM jobs WHERE status='pending' ORDER BY id ASC LIMIT 1"
+            )
+            row = await cur.fetchone()
+            if not row:
+                return None
+            job_id = int(row[0])
+            await db.execute(
+                "UPDATE jobs SET status='skipped', error='Skipped by admin', updated_at=? WHERE id=?",
+                (now, job_id),
+            )
+            await db.commit()
+            return job_id
 
     async def retry_failed(self):
         async with aiosqlite.connect(self.path) as db:

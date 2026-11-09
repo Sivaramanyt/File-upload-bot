@@ -22,7 +22,7 @@ class JobStore:
                     status TEXT NOT NULL DEFAULT 'pending',
                     attempts INTEGER NOT NULL DEFAULT 0,
                     peestream_filecode TEXT,
-                    video_url TEXT,
+                    video_url TEXT,\n                    thumbnail_url TEXT,
                     error TEXT,
                     created_at INTEGER NOT NULL,
                     updated_at INTEGER NOT NULL,
@@ -30,6 +30,9 @@ class JobStore:
                     UNIQUE(chat_id, message_id)
                 )
             """)
+            columns = await (await db.execute("PRAGMA table_info(jobs)")).fetchall()
+            if "thumbnail_url" not in {row[1] for row in columns}:
+                await db.execute("ALTER TABLE jobs ADD COLUMN thumbnail_url TEXT")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status, next_attempt_at)")
             # A process may have been interrupted during a transfer. Re-queue it safely.
             await db.execute(
@@ -72,7 +75,7 @@ class JobStore:
 
     async def update(self, job_id: int, **fields):
         allowed = {
-            "status", "attempts", "peestream_filecode", "video_url",
+            "status", "attempts", "peestream_filecode", "video_url", "thumbnail_url",
             "error", "next_attempt_at"
         }
         values = {k: v for k, v in fields.items() if k in allowed}

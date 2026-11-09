@@ -33,6 +33,12 @@ class JobStore:
             columns = await (await db.execute("PRAGMA table_info(jobs)")).fetchall()
             if "thumbnail_url" not in {row[1] for row in columns}:
                 await db.execute("ALTER TABLE jobs ADD COLUMN thumbnail_url TEXT")
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS scheduler_state (
+                    key TEXT PRIMARY KEY,
+                    value INTEGER NOT NULL
+                )
+            """)
             await db.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status, next_attempt_at)")
             # A process may have been interrupted during a transfer. Re-queue it safely.
             await db.execute(
@@ -53,9 +59,33 @@ class JobStore:
             await db.commit()
             return cur.rowcount == 1
 
+    async def get_next_publish_at(self):
+        async with aiosqlite.connect(self.path) as db:
+            cur = await db.execute(
+                "SELECT value FROM scheduler_state WHERE key='next_publish_at'"
+            )
+            row = await cur.fetchone()
+            return int(row[0]) if row else 0
+
+    async def set_next_publish_at(self, timestamp: int):
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                """INSERT INTO scheduler_state(key, value)
+                   VALUES ('next_publish_at', ?)
+                   ON CONFLICT(key) DO UPDATE SET value=excluded.value""",
+                (int(timestamp),),
+            )
+            await db.commit()
+
     async def next_job(self):
         now = int(time.time())
         async with aiosqlite.connect(self.path) as db:
+            cur = await db.execute(
+                "SELECT value FROM scheduler_state WHERE key='next_publish_at'"
+            )
+            schedule = await cur.fetchone()
+            if schedule and int(schedule[0]) > now:
+                return None
             db.row_factory = aiosqlite.Row
             cur = await db.execute(
                 """SELECT * FROM jobs

@@ -12,7 +12,7 @@ import aiohttp
 from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.filters import Command
-from aiogram.types import Message as BotMessage
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message as BotMessage
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 
@@ -380,20 +380,26 @@ async def main():
                         pass
 
         safe_title = html.escape(title)
-        safe_url = html.escape(video_url, quote=True)
-        post = f"<b>{safe_title}</b>\n\n▶️ <a href=\"{safe_url}\">Watch video</a>"
+        post = f"<b>{safe_title}</b>"
+        watch_keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[[
+                InlineKeyboardButton(text="▶️ WATCH VIDEO", url=video_url)
+            ]]
+        )
         if thumbnail_url:
             await bot.send_photo(
                 cfg.target_channel_id,
                 photo=thumbnail_url,
                 caption=post,
                 parse_mode="HTML",
+                reply_markup=watch_keyboard,
             )
         else:
             await bot.send_message(
                 cfg.target_channel_id,
                 post,
                 parse_mode="HTML",
+                reply_markup=watch_keyboard,
                 disable_web_page_preview=False,
             )
         await store.update(job_id, status="published", error=None)

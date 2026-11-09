@@ -1,5 +1,6 @@
 import os
 import time
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import aiosqlite
 
 try:
@@ -20,8 +21,15 @@ class JobStore:
             if asyncpg is None:
                 raise RuntimeError("DATABASE_URL is set but asyncpg is not installed")
             dsn = self.database_url.replace("postgres://", "postgresql://", 1)
+            # asyncpg understands sslmode, but channel_binding is a libpq-only
+            # URI option and would otherwise be forwarded as a server setting.
+            parsed = urlsplit(dsn)
+            query = [(key, value) for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+                     if key.lower() != "channel_binding"]
+            dsn = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment))
             self.pool = await asyncpg.create_pool(dsn=dsn, min_size=1, max_size=5,
-                command_timeout=60, server_settings={"application_name": "file-upload-bot"})
+                command_timeout=60, statement_cache_size=0,
+                server_settings={"application_name": "file-upload-bot"})
             async with self.pool.acquire() as db:
                 await db.execute("""
                     CREATE TABLE IF NOT EXISTS jobs (

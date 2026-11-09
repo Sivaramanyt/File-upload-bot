@@ -134,9 +134,17 @@ async def main():
             return
         counts = await store.counts()
         lines = [f"{html.escape(k)}: {v}" for k, v in sorted(counts.items())]
+        next_slot = await store.get_next_publish_at()
+        wait_seconds = max(0, next_slot - int(time.time()))
+        wait_text = (
+            f"{(wait_seconds + 59) // 60} minute(s)"
+            if wait_seconds else "Ready for next video"
+        )
         await message.answer(
             "<b>Publisher status</b>\n"
             f"Paused: {state['paused']}\n"
+            f"Publishing interval: {cfg.publish_interval_minutes} minutes\n"
+            f"Next publish slot: {html.escape(wait_text)}\n"
             + ("\n".join(lines) if lines else "No jobs yet."),
             parse_mode="HTML",
         )
@@ -265,6 +273,14 @@ async def main():
                 disable_web_page_preview=False,
             )
         await store.update(job_id, status="published", error=None)
+        # Persist the next publishing slot so a process restart does not
+        # release the remaining queue immediately.
+        next_slot = int(time.time()) + cfg.publish_interval_minutes * 60
+        await store.set_next_publish_at(next_slot)
+        log.info(
+            "Next queued video can publish in %s minute(s)",
+            cfg.publish_interval_minutes,
+        )
         await notify_admin(
             f"✅ Published: <b>{safe_title}</b>\n"
             f"<a href=\"{safe_url}\">Open video link</a>"

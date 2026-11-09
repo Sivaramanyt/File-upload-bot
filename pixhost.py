@@ -6,7 +6,7 @@ from pathlib import Path
 class PixhostClient:
     """Pixhost API v2 client. NSFW content_type=1 is intentional for adult previews."""
 
-    def __init__(self, api_base="https://api.pixhost.cc", content_type=1, thumb_size=420):
+    def __init__(self, api_base="https://api.pixhost.cc", content_type=1, thumb_size=800):
         self.api_base = api_base.rstrip("/")
         self.content_type = str(content_type)
         self.thumb_size = str(thumb_size)

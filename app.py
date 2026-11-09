@@ -221,7 +221,7 @@ async def main():
             return
         parts = (message.text or "").split(maxsplit=1)
         if len(parts) != 2:
-            await message.answer("Usage: /backfill 10\\nQueues the latest N videos from the storage channel, oldest first.")
+            await message.answer("Usage: /backfill 10\nQueues the latest N videos from the storage channel, oldest first.")
             return
         try:
             limit = int(parts[1].strip())
@@ -243,7 +243,7 @@ async def main():
             if await store.add(cfg.storage_channel_id, message_id, filename, file_size):
                 added += 1
         await message.answer(
-            f"✅ Backfill checked {len(found)} recent video(s).\\n"
+            f"✅ Backfill checked {len(found)} recent video(s).\n"
             f"Added {added} new job(s); existing message IDs were left unchanged."
         )
 
@@ -554,6 +554,7 @@ async def main():
         await runner.cleanup()
         await telethon.disconnect()
         await bot.session.close()
+        await store.close()
 
 
 if __name__ == "__main__":

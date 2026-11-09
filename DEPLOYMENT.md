@@ -23,6 +23,16 @@
 4. It then requests /api/file/info?key=...&file_code=... and looks for a returned public link.
 5. The app deliberately does not invent a watch URL. If PeeStream's response does not contain a public link, check the API response and set PEESTREAM_LINK_TEMPLATE only after verifying the correct official link format. The template must contain {filecode}.
 
+
+## 3A. Adult thumbnail hosting with Pixhost
+1. This project uses the official Pixhost API v2: `POST https://api.pixhost.cc/images`. API v2 documentation says no API key is required.
+2. The app extracts one frame from each video with FFmpeg, then uploads it to Pixhost.
+3. Adult previews are explicitly classified with `content_type=1` (NSFW). The API returns `show_url` and `th_url`; the bot sends the returned thumbnail URL as a Telegram photo with the PeeStream watch link in the caption.
+4. Pixhost's documented maximum image size is 10 MB. The generated JPEG preview is resized to a maximum width of 960 px and the returned Pixhost thumbnail uses the configured maximum size (default 420).
+5. Set optional `PIXHOST_API_BASE=https://api.pixhost.cc` and `PIXHOST_THUMB_SIZE=420`. No Pixhost API key is needed.
+6. Pixhost's Terms allow lawful adult content only when every depicted person is an adult and consented to both creation and distribution. Do not upload minors, non-consensual intimate imagery, leaks, or content you lack rights to distribute. Public image URLs are not private.
+7. Pixhost does not promise permanent availability. Review its terms and current upload limits before relying on it for a commercial workflow.
+
 ## 4. Required environment variables
 Copy .env.example values into Koyeb environment variables. Required:
 - TELEGRAM_BOT_TOKEN
@@ -42,7 +52,7 @@ Optional:
 - MAX_VIDEO_MB (default 500)
 - PORT (Koyeb normally injects this)
 - WORKER_POLL_SECONDS (default 5)
-- MAX_UPLOAD_ATTEMPTS (default 5)
+- MAX_UPLOAD_ATTEMPTS (default 5)\n- PIXHOST_API_BASE (default https://api.pixhost.cc)\n- PIXHOST_THUMB_SIZE (default 420)
 
 ## 5. Deploy to Koyeb
 1. Create a Web Service from this GitHub repository.
@@ -64,7 +74,7 @@ Send these commands to your bot from the ADMIN_USER_ID account:
 1. Start with one small video you own or are authorized to distribute.
 2. Confirm it appears in the storage channel.
 3. Check bot /status and Koyeb logs.
-4. Confirm the file appears in PeeStream and that a real public watch link is published to the destination channel.
+4. Confirm the file appears in PeeStream, a Pixhost NSFW thumbnail is created, and the destination channel receives the thumbnail with the PeeStream watch link in its caption.
 5. Only after this succeeds, test larger files and a larger daily queue.
 
 ## Notes
@@ -72,4 +82,4 @@ Send these commands to your bot from the ADMIN_USER_ID account:
 - Both Bot API and Telethon may detect the same channel post. The database unique key (chat_id, message_id) deduplicates them.
 - This first version processes one video at a time and stores job state in SQLite.
 - The Koyeb Free tier is for testing only; uninterrupted 20+ videos/day processing needs an always-on worker and durable storage.
-- Upload only content you own or have permission to distribute. Respect Telegram and PeeStream terms and applicable law.
+- Upload only content you own or have permission to distribute. For adult images, every depicted person must be an adult and must have consented to creation and distribution. Respect Pixhost, Telegram and PeeStream terms and applicable law.

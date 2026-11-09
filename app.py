@@ -88,7 +88,7 @@ async def main():
     pixhost = PixhostClient(
         api_base=os.getenv("PIXHOST_API_BASE", "https://api.pixhost.cc"),
         content_type=1,
-        thumb_size=int(os.getenv("PIXHOST_THUMB_SIZE", "420")),
+        thumb_size=int(os.getenv("PIXHOST_THUMB_SIZE", "800")),
     )
     saved_interval = await store.get_setting(
         "publish_interval_minutes", cfg.publish_interval_minutes
@@ -347,8 +347,8 @@ async def main():
                     proc = await asyncio.create_subprocess_exec(
                         "ffmpeg", "-hide_banner", "-loglevel", "error",
                         "-ss", "00:00:03", "-i", temp_path,
-                        "-frames:v", "1", "-vf", "scale=960:-2",
-                        "-q:v", "3", "-y", thumb_path,
+                        "-frames:v", "1", "-vf", "scale=w='min(1280,iw)':h=-2",
+                        "-q:v", "2", "-y", thumb_path,
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.PIPE,
                     )
@@ -357,7 +357,7 @@ async def main():
                         proc = await asyncio.create_subprocess_exec(
                             "ffmpeg", "-hide_banner", "-loglevel", "error",
                             "-i", temp_path, "-frames:v", "1",
-                            "-vf", "scale=960:-2", "-q:v", "3", "-y", thumb_path,
+                            "-vf", "scale=w='min(1280,iw)':h=-2", "-q:v", "2", "-y", thumb_path,
                             stdout=asyncio.subprocess.PIPE,
                             stderr=asyncio.subprocess.PIPE,
                         )

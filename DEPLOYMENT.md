@@ -50,7 +50,7 @@ Optional:
 - PORT (Koyeb normally injects this)
 - WORKER_POLL_SECONDS (default 5)
 - MAX_UPLOAD_ATTEMPTS (default 5)
-- PUBLISH_INTERVAL_MINUTES (default 30; minimum 1; initial/default value)
+- PUBLISH_INTERVAL_MINUTES (default 15; minimum 1)
 - PIXHOST_API_BASE (default https://api.pixhost.cc)
 - PIXHOST_THUMB_SIZE (default 420)
 
@@ -65,9 +65,9 @@ Optional:
 ## 5A. Scheduled publishing queue
 - Videos are detected and queued immediately, but only one worker processes them at a time.
 - The first queued video can publish immediately. After each successful publication, the next video is held until the configured interval has elapsed.
-- Set `PUBLISH_INTERVAL_MINUTES=30` for one publication every 30 minutes. The next slot is stored in SQLite so it survives ordinary process restarts when the database storage itself persists.
+- Set `PUBLISH_INTERVAL_MINUTES=15` for one publication every 15 minutes. The next slot is stored in SQLite so it survives ordinary process restarts when the database storage itself persists.
 - The interval is measured from the previous successful publication, not from when a video was uploaded to the storage channel.
-- The admin can change the interval with `/setinterval 30`; this value is saved in SQLite and overrides the environment default after first initialization.
+- The admin can change the interval with `/setinterval 15`; this value is saved in SQLite and overrides the environment default after first initialization.
 - On Koyeb Free instances without persistent storage, local SQLite data and the saved schedule may be lost when the instance is replaced or scaled down. Use persistent storage or an external database if preserving the queue is essential.
 
 ## 6. Bot commands
@@ -75,12 +75,12 @@ Send these commands to your bot from the ADMIN_USER_ID account:
 - `/start`, `/help`
 - `/status`, `/queue`, `/history`, `/stats`
 - `/pause`, `/resume`, `/skip`, `/retry`
-- `/setinterval 30` (allowed range 1–1440 minutes)
+- `/setinterval 15` (allowed range 1–1440 minutes)
 
 Duplicate protection calculates SHA-256 after downloading a new queued video and before sending it to PeeStream. Exact byte-for-byte matches of previously published videos are skipped. The duplicate is still downloaded once for hashing. Historical published jobs that predate this feature have no saved fingerprints, so they are not automatically recognized as duplicates. Queue listing and history commands show up to 10 jobs each.
 
 ## 7. First test
-1. Wait until the current bulk queue has finished before deploying a worker update; a deployment restarts the service.
+1. Deploy the worker update; a deployment restarts the service and can interrupt an in-flight upload. Any job left processing is re-queued on startup.
 2. After deployment, test with a small video you own or are authorized to distribute.
 3. Confirm it appears in the storage channel.
 4. Check bot `/status`, `/queue`, and Koyeb logs.

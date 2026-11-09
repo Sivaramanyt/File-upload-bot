@@ -287,6 +287,9 @@ async def main():
             "with generate_session.py and set it as a Koyeb secret."
         )
 
+    # Long polling requires the bot webhook to be cleared first.
+    await bot.delete_webhook(drop_pending_updates=False)
+
     worker_task = asyncio.create_task(worker(), name="upload-worker")
     polling_task = asyncio.create_task(
         dp.start_polling(bot, allowed_updates=["message", "channel_post"]),

@@ -8,13 +8,11 @@
 5. Get the numeric channel IDs and your own numeric Telegram user ID. Channel IDs commonly look like -1001234567890.
 
 ## 2. Generate a Telethon StringSession
-1. Create Telegram API credentials at https://my.telegram.org.
-2. On a trusted local device, clone this repository and install dependencies:
-   `pip install -r requirements.txt`
-3. Set TELEGRAM_API_ID and TELEGRAM_API_HASH in a local, untracked .env file.
-4. Run `python generate_session.py`, complete Telegram login and any 2-step verification.
-5. Copy the printed StringSession directly into Koyeb's secret environment variable TELETHON_SESSION.
-6. Never share this session string. It gives access to your Telegram account.
+1. On a trusted local device, clone this repository and install dependencies: `pip install -r requirements.txt`
+2. Set TELEGRAM_API_ID and TELEGRAM_API_HASH in a local, untracked .env file.
+3. Run `python generate_session.py`, complete Telegram login and any 2-step verification.
+4. Copy the printed StringSession directly into Koyeb's secret environment variable TELETHON_SESSION.
+5. Never share this session string. It gives access to your Telegram account.
 
 ## 3. PeeStream setup
 1. Copy the API key from PeeStream Settings.
@@ -22,7 +20,6 @@
 3. The app requests GET /api/upload/server?key=... and POSTs multipart fields file, fld_id, and new_title to the returned upload server.
 4. It then requests /api/file/info?key=...&file_code=... and looks for a returned public link.
 5. The app deliberately does not invent a watch URL. If PeeStream's response does not contain a public link, check the API response and set PEESTREAM_LINK_TEMPLATE only after verifying the correct official link format. The template must contain {filecode}.
-
 
 ## 3A. Adult thumbnail hosting with Pixhost
 1. This project uses the official Pixhost API v2: `POST https://api.pixhost.cc/images`. API v2 documentation says no API key is required.
@@ -53,8 +50,9 @@ Optional:
 - PORT (Koyeb normally injects this)
 - WORKER_POLL_SECONDS (default 5)
 - MAX_UPLOAD_ATTEMPTS (default 5)
-- PUBLISH_INTERVAL_MINUTES (default 30; minimum 1)
-- PIXHOST_API_BASE (default https://api.pixhost.cc)\n- PIXHOST_THUMB_SIZE (default 420)
+- PUBLISH_INTERVAL_MINUTES (default 30; minimum 1; initial/default value)
+- PIXHOST_API_BASE (default https://api.pixhost.cc)
+- PIXHOST_THUMB_SIZE (default 420)
 
 ## 5. Deploy to Koyeb
 1. Create a Web Service from this GitHub repository.
@@ -67,28 +65,31 @@ Optional:
 ## 5A. Scheduled publishing queue
 - Videos are detected and queued immediately, but only one worker processes them at a time.
 - The first queued video can publish immediately. After each successful publication, the next video is held until the configured interval has elapsed.
-- Set PUBLISH_INTERVAL_MINUTES=30 for one publication every 30 minutes. The next slot is stored in SQLite so it survives ordinary process restarts when the database storage itself persists.
+- Set `PUBLISH_INTERVAL_MINUTES=30` for one publication every 30 minutes. The next slot is stored in SQLite so it survives ordinary process restarts when the database storage itself persists.
 - The interval is measured from the previous successful publication, not from when a video was uploaded to the storage channel.
+- The admin can change the interval with `/setinterval 30`; this value is saved in SQLite and overrides the environment default after first initialization.
 - On Koyeb Free instances without persistent storage, local SQLite data and the saved schedule may be lost when the instance is replaced or scaled down. Use persistent storage or an external database if preserving the queue is essential.
 
 ## 6. Bot commands
 Send these commands to your bot from the ADMIN_USER_ID account:
-- /start
-- /status
-- /pause
-- /resume
-- /retry
+- `/start`, `/help`
+- `/status`, `/queue`, `/history`, `/stats`
+- `/pause`, `/resume`, `/skip`, `/retry`
+- `/setinterval 30` (allowed range 1–1440 minutes)
+
+Duplicate protection calculates SHA-256 after downloading a new queued video and before sending it to PeeStream. Exact byte-for-byte matches of previously published videos are skipped. The duplicate is still downloaded once for hashing. Historical published jobs that predate this feature have no saved fingerprints, so they are not automatically recognized as duplicates. Queue listing and history commands show up to 10 jobs each.
 
 ## 7. First test
-1. Start with one small video you own or are authorized to distribute.
-2. Confirm it appears in the storage channel.
-3. Check bot /status and Koyeb logs.
-4. Confirm the file appears in PeeStream, a Pixhost NSFW thumbnail is created, and the destination channel receives the thumbnail with the PeeStream watch link in its caption.
-5. Only after this succeeds, test larger files and a larger daily queue.
+1. Wait until the current bulk queue has finished before deploying a worker update; a deployment restarts the service.
+2. After deployment, test with a small video you own or are authorized to distribute.
+3. Confirm it appears in the storage channel.
+4. Check bot `/status`, `/queue`, and Koyeb logs.
+5. Confirm the file appears in PeeStream, a Pixhost NSFW thumbnail is created, and the destination channel receives the thumbnail with the PeeStream watch link in its caption.
+6. Upload the exact same test file again and verify it is marked duplicate without a second PeeStream upload. Then test `/history`, `/stats`, `/skip` on a disposable pending job, and `/setinterval`.
 
 ## Notes
 - The Bot API monitor is a second detector only. Standard Bot API getFile downloads are limited to 20 MB; large media is downloaded through Telethon.
 - Both Bot API and Telethon may detect the same channel post. The database unique key (chat_id, message_id) deduplicates them.
 - This first version processes one video at a time and stores job state in SQLite.
-- The Koyeb Free tier is for testing only; uninterrupted 20+ videos/day processing needs an always-on worker and durable storage.
+- The Koyeb Free tier is for testing only; uninterrupted processing needs an always-on worker and durable storage.
 - Upload only content you own or have permission to distribute. For adult images, every depicted person must be an adult and must have consented to creation and distribution. Respect Pixhost, Telegram and PeeStream terms and applicable law.

@@ -91,7 +91,7 @@ def media_details(message):
 
 async def main():
     cfg = Settings.load()
-    store = JobStore(cfg.database_path)
+    store = JobStore(cfg.database_path, cfg.database_url)
     await store.init()
 
     bot = Bot(token=cfg.bot_token)
@@ -215,6 +215,38 @@ async def main():
             lines.append(line)
         await message.answer("\n\n".join(lines), parse_mode="HTML")
 
+    @dp.message(Command("backfill"))
+    async def cmd_backfill(message: BotMessage):
+        if not admin_only(message):
+            return
+        parts = (message.text or "").split(maxsplit=1)
+        if len(parts) != 2:
+            await message.answer("Usage: /backfill 10\\nQueues the latest N videos from the storage channel, oldest first.")
+            return
+        try:
+            limit = int(parts[1].strip())
+        except ValueError:
+            await message.answer("Enter a number, for example /backfill 10.")
+            return
+        if not 1 <= limit <= 100:
+            await message.answer("Backfill limit must be between 1 and 100.")
+            return
+        found = []
+        async for msg in telethon.iter_messages(cfg.storage_channel_id):
+            details = media_details(msg)
+            if details:
+                found.append((msg.id, details[0], details[1]))
+                if len(found) >= limit:
+                    break
+        added = 0
+        for message_id, filename, file_size in reversed(found):
+            if await store.add(cfg.storage_channel_id, message_id, filename, file_size):
+                added += 1
+        await message.answer(
+            f"✅ Backfill checked {len(found)} recent video(s).\\n"
+            f"Added {added} new job(s); existing message IDs were left unchanged."
+        )
+
     @dp.message(Command("skip"))
     async def cmd_skip(message: BotMessage):
         if not admin_only(message):
@@ -296,6 +328,7 @@ async def main():
                 "/queue - first 10 pending/processing jobs\n"
                 "/history - last 10 completed jobs\n"
                 "/stats - upload analytics\n"
+                "/backfill 10 - queue the latest 10 storage-channel videos\n"
                 "/skip - skip the oldest pending job\n"
                 "/setinterval 30 - change publish interval\n"
                 "/pause - pause uploads\n"

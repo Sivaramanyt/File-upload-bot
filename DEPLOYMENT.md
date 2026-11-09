@@ -52,7 +52,9 @@ Optional:
 - MAX_VIDEO_MB (default 500)
 - PORT (Koyeb normally injects this)
 - WORKER_POLL_SECONDS (default 5)
-- MAX_UPLOAD_ATTEMPTS (default 5)\n- PIXHOST_API_BASE (default https://api.pixhost.cc)\n- PIXHOST_THUMB_SIZE (default 420)
+- MAX_UPLOAD_ATTEMPTS (default 5)
+- PUBLISH_INTERVAL_MINUTES (default 30; minimum 1)
+- PIXHOST_API_BASE (default https://api.pixhost.cc)\n- PIXHOST_THUMB_SIZE (default 420)
 
 ## 5. Deploy to Koyeb
 1. Create a Web Service from this GitHub repository.
@@ -61,6 +63,13 @@ Optional:
 4. Expose the service on the configured PORT (default 8000) and use /health as the health-check path.
 5. Keep in mind that a Koyeb Free Instance may scale to zero and has no persistent volume. It is not a reliable always-on Telegram listener. The SQLite database is local to the instance and can be lost on replacement/redeploy. Use an always-on instance plus persistent storage or an external database for production.
 6. After deployment, open the service URL /health. A JSON status response should appear.
+
+## 5A. Scheduled publishing queue
+- Videos are detected and queued immediately, but only one worker processes them at a time.
+- The first queued video can publish immediately. After each successful publication, the next video is held until the configured interval has elapsed.
+- Set PUBLISH_INTERVAL_MINUTES=30 for one publication every 30 minutes. The next slot is stored in SQLite so it survives ordinary process restarts when the database storage itself persists.
+- The interval is measured from the previous successful publication, not from when a video was uploaded to the storage channel.
+- On Koyeb Free instances without persistent storage, local SQLite data and the saved schedule may be lost when the instance is replaced or scaled down. Use persistent storage or an external database if preserving the queue is essential.
 
 ## 6. Bot commands
 Send these commands to your bot from the ADMIN_USER_ID account:

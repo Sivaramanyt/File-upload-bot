@@ -28,6 +28,26 @@ logging.basicConfig(
 log = logging.getLogger("file-upload-bot")
 
 
+CATCHY_HEADLINES = [
+    "🔥 DON'T MISS THIS ONE!",
+    "👀 YOU NEED TO WATCH THIS!",
+    "⚡ THIS ONE IS WORTH YOUR TIME!",
+    "💥 UNMISSABLE VIDEO!",
+    "🤯 WAIT UNTIL YOU SEE THIS!",
+    "🎬 WATCH IT NOW!",
+    "🔥 HERE'S ONE YOU CAN'T IGNORE!",
+    "👀 READY FOR THIS?",
+    "💫 A MUST-WATCH VIDEO!",
+    "⚡ HIT PLAY AND ENJOY!",
+    "😮 THIS MIGHT SURPRISE YOU!",
+    "🎯 YOUR NEXT WATCH STARTS HERE!",
+    "🚀 DON'T SCROLL PAST THIS!",
+    "✨ SOMETHING WORTH CHECKING OUT!",
+    "🔔 TAKE A LOOK AT THIS!",
+    "🍿 TIME TO WATCH!",
+]
+
+
 def media_details(message):
     video = getattr(message, "video", None)
     document = getattr(message, "document", None)
@@ -380,7 +400,8 @@ async def main():
                         pass
 
         safe_title = html.escape(title)
-        post = f"<b>{safe_title}</b>"
+        headline = CATCHY_HEADLINES[(job_id - 1) % len(CATCHY_HEADLINES)]
+        post = f"<b>{headline}</b>\n\n<b>{safe_title}</b>"
         watch_keyboard = InlineKeyboardMarkup(
             inline_keyboard=[[
                 InlineKeyboardButton(text="▶️ WATCH VIDEO", url=video_url)

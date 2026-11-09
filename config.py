@@ -26,6 +26,7 @@ class Settings:
     peestream_folder_id: str
     peestream_link_template: str
     database_path: str
+    database_url: str
     max_video_mb: int
     port: int
     worker_poll_seconds: int
@@ -47,6 +48,7 @@ class Settings:
             peestream_folder_id=os.getenv("PEESTREAM_FOLDER_ID", "0"),
             peestream_link_template=os.getenv("PEESTREAM_LINK_TEMPLATE", "").strip(),
             database_path=os.getenv("DATABASE_PATH", "./data/jobs.sqlite3"),
+            database_url=os.getenv("DATABASE_URL", "").strip(),
             max_video_mb=int(os.getenv("MAX_VIDEO_MB", "500")),
             port=int(os.getenv("PORT", "8000")),
             worker_poll_seconds=int(os.getenv("WORKER_POLL_SECONDS", "5")),
